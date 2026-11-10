@@ -1,1 +1,69 @@
+name: Python Application CI Pipeline
 
+on:
+  push:
+    branches: [ "main" ]
+
+permissions:
+  id-token: write   # Mandatory for secure AWS OIDC token exchange
+  contents: write   # Allows pushing tag updates back to your config repository
+
+jobs:
+  build-and-ship:
+    runs-on: ubuntu-latest
+    steps:
+      # 1. Fetch the Python app code from this repo
+      - name: Checkout Application Code
+        uses: actions/checkout@v4
+
+      # 2. Production Security Scan
+      - name: Run Trivy FS Vulnerability Scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          exit-code: '1' # Fails the build immediately if issues are found
+          severity: 'CRITICAL,HIGH'
+
+      # 3. Securely authenticate with AWS using zero-trust OIDC
+      - name: Configure AWS Credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::123456789012:role/github-actions-ecr-role # Replace with your AWS IAM Role ARN
+          aws-region: us-east-1
+          audience: ://amazonaws.com
+
+      # 4. Log in to AWS ECR
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # 5. Build, tag, and push the Python image
+      - name: Build and Push Image to Amazon ECR
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: dev-app-repo
+          IMAGE_TAG: ${{ github.sha }} # Immutability standard: Uses unique Git Commit SHA
+        run: |
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+
+      # 6. GitOps Handshake: Update the tag inside your infrastructure/manifest repo
+      - name: Update Kubernetes GitOps Manifest Tag
+        env:
+          INFRA_REPO_URL: "://github.com" # Matches your infra repo
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          git config --global user.email "devops-bot@company.com"
+          git config --global user.name "GitOps-Automation-Bot"
+          
+          # Clones your existing infra/manifest repo using a secure Personal Access Token
+          git clone https://${{ secrets.GITOPS_PAT }}@$INFRA_REPO_URL infra-repo
+          cd infra-repo/environments/dev
+          
+          # Updates the target deployment file with the fresh ECR image path and tag
+          sed -i "s|image: .*|image: ://amazonaws.com|g" deployment.yaml
+          
+          git add deployment.yaml
+          git commit -m "chore(gitops): automated rollout to version $IMAGE_TAG [skip ci]"
+          git push origin main
