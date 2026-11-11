@@ -3,6 +3,9 @@ name: Python Application CI Pipeline
 on:
   push:
     branches: [ "main" ]
+    paths-ignore:
+      - "helm_charts/*"
+      
   workflow_dispatch:
 
 permissions:
