@@ -47,5 +47,5 @@ jobs:
         run: |
           docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
           echo "+++++++++++++++++++++++++++++++++++++++++++++++++"
-          ehco "Printing duild images"
+          echo "Printing duild images"
           docker image ls
