@@ -3,10 +3,10 @@ name: Python Application CI Pipeline
 on:
   push:
     branches: [ "main" ]
+  workflow_dispatch:
 
 permissions:
-  id-token: write   # Mandatory for secure AWS OIDC token exchange
-  contents: write   # Allows pushing tag updates back to your config repository
+  contents: write   # Necessary for the GitOps bot to commit and push to your repo
 
 jobs:
   build-and-ship:
@@ -22,18 +22,18 @@ jobs:
         with:
           scan-type: 'fs'
           scan-ref: '.'
-          exit-code: '1' # Fails the build immediately if issues are found
+          exit-code: '1' # Fails the build immediately if security bugs are found
           severity: 'CRITICAL,HIGH'
 
-      # 3. Securely authenticate with AWS using zero-trust OIDC
-      - name: Configure AWS Credentials (OIDC)
+      # 3. Authenticate with AWS using Repository Secrets
+      - name: Configure AWS Credentials (Static Keys)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::123456789012:role/github-actions-ecr-role # Replace with your AWS IAM Role ARN
-          aws-region: us-east-1
-          audience: ://amazonaws.com
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ap-southeast-2 # Match your Sydney infrastructure region
 
-      # 4. Log in to AWS ECR
+      # 4. Log in to your manual AWS ECR registry
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
@@ -42,28 +42,9 @@ jobs:
       - name: Build and Push Image to Amazon ECR
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          ECR_REPOSITORY: dev-app-repo
-          IMAGE_TAG: ${{ github.sha }} # Immutability standard: Uses unique Git Commit SHA
-        run: |
-          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-
-      # 6. GitOps Handshake: Update the tag inside your infrastructure/manifest repo
-      - name: Update Kubernetes GitOps Manifest Tag
-        env:
-          INFRA_REPO_URL: "://github.com" # Matches your infra repo
+          ECR_REPOSITORY: my-end-to-end/images # Ensure this matches your manually created ECR Repo Name
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          git config --global user.email "devops-bot@company.com"
-          git config --global user.name "GitOps-Automation-Bot"
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+          docker image ls
           
-          # Clones your existing infra/manifest repo using a secure Personal Access Token
-          git clone https://${{ secrets.GITOPS_PAT }}@$INFRA_REPO_URL infra-repo
-          cd infra-repo/environments/dev
-          
-          # Updates the target deployment file with the fresh ECR image path and tag
-          sed -i "s|image: .*|image: ://amazonaws.com|g" deployment.yaml
-          
-          git add deployment.yaml
-          git commit -m "chore(gitops): automated rollout to version $IMAGE_TAG [skip ci]"
-          git push origin main
