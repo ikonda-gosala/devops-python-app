@@ -53,3 +53,4 @@ jobs:
           echo "Printing duild images"
           docker image ls
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          
