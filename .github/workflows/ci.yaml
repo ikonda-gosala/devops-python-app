@@ -4,7 +4,7 @@ on:
   push:
     branches: [ "main" ]
     paths-ignore:
-      - "helm_charts/*"
+      - "helm_charts/**"
       
   workflow_dispatch:
 
