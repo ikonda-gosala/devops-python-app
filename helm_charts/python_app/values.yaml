@@ -1,15 +1,23 @@
-
 replicaCount: 2
 
 image:
-  repository: nginx
-  tag: "1.27-alpine"
-  pullPolicy: IfNotPresent
+  repository: 217856377746.dkr.ecr.ap-southeast-2.amazonaws.com/my-end-to-end/images
+  tag: "latest"
+  pullPolicy: Always
+
+# Leave empty [] if running on AWS EKS with node IAM permissions (AmazonEC2ContainerRegistryReadOnly).
+imagePullSecrets: []
 
 service:
-  type: ClusterIP
+  type: LoadBalancer
   port: 80
   targetPort: 80
+  annotations:
+    # Provisions an AWS Network Load Balancer (NLB) via AWS Load Balancer Controller
+    service.beta.kubernetes.io/aws-load-balancer-type: "external"
+    service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: "ip"
+    # Set to "internet-facing" for public access or "internal" for private VPC-only access
+    service.beta.kubernetes.io/aws-load-balancer-scheme: "internet-facing"
 
 resources:
   limits:
