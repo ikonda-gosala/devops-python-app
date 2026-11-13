@@ -134,18 +134,15 @@ jobs:
 
       # 12. GitOps Update: Modify Helm values.yaml and Push to Repo
             # 12. GitOps Update: Modify Helm values.yaml and Push to Repo
+            # 12. GitOps Update: Modify Helm values.yaml and Push to Repo
       - name: Update Helm Chart Image Tag
         run: |
-          # Install yq to safely edit YAML files
-          sudo wget -qO /usr/local/bin/yq https://github.com
-          sudo chmod +x /usr/local/bin/yq
-
-          # Update .image.tag while preserving double quotes around the SHA
+          # Update .image.tag using pre-installed yq while preserving double quotes
           yq e '.image.tag = "${{ env.IMAGE_TAG }}"' -i helm_charts/python_app/values.yaml
 
           # Configure Git bot identity
           git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@://github.com"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           # Commit and push only if the tag actually changed
           git add helm_charts/python_app/values.yaml
@@ -155,4 +152,3 @@ jobs:
             git commit -m "chore(gitops): update python_app image tag to ${{ env.IMAGE_TAG }}"
             git push
           fi
-
