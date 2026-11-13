@@ -11,7 +11,7 @@ imagePullSecrets: []
 service:
   type: LoadBalancer
   port: 80
-  targetPort: 80
+  targetPort: 8000
   annotations:
     # Provisions an AWS Network Load Balancer (NLB) via AWS Load Balancer Controller
     service.beta.kubernetes.io/aws-load-balancer-type: "external"
