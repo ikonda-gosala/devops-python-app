@@ -14,7 +14,7 @@ service:
   targetPort: 8000
   annotations:
     # Provisions an AWS Network Load Balancer (NLB) via AWS Load Balancer Controller
-    service.beta.kubernetes.io/aws-load-balancer-type: "external"
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
     service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: "ip"
     # Set to "internet-facing" for public access or "internal" for private VPC-only access
     service.beta.kubernetes.io/aws-load-balancer-scheme: "internet-facing"
