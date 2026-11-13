@@ -1,7 +1,7 @@
 replicaCount: 2
 image:
   repository: 217856377746.dkr.ecr.ap-southeast-2.amazonaws.com/my-end-to-end/images
-  tag: "acc9d380ddcdf83ab268e68966422a67b729cd22"
+  tag: "b5733a0b5a51abd36a87cfecf65a94e0e49c2168"
   pullPolicy: Always
 # Leave empty [] if running on AWS EKS with node IAM permissions (AmazonEC2ContainerRegistryReadOnly).
 imagePullSecrets: []
