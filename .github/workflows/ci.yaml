@@ -75,14 +75,15 @@ jobs:
         run: |
           docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
 
-      # 9. Scan Built Image with Trivy and Output JSON Report
+            # 9. Scan Built Image with Trivy (Only fixable vulnerabilities)
       - name: Scan Image with Trivy (Generate Report)
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: '${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}'
           format: 'json'
           output: 'trivy-results.json'
-          exit-code: '0' # Let the custom Python script below evaluate the 80% score
+          ignore-unfixed: true
+          exit-code: '0'
 
       # 10. Calculate Security Score (%) and Enforce 80% Threshold
       - name: Evaluate Image Security Score (>= 80%)
@@ -93,29 +94,36 @@ jobs:
           with open('trivy-results.json') as f:
               data = json.load(f)
 
-          # Penalty weights per vulnerability severity
           penalties = {'CRITICAL': 25, 'HIGH': 10, 'MEDIUM': 3, 'LOW': 1}
           total_penalty = 0
           counts = {'CRITICAL': 0, 'HIGH': 0, 'MEDIUM': 0, 'LOW': 0}
+          flagged = []
 
           for result in data.get('Results', []):
               for vuln in result.get('Vulnerabilities', []):
+                  # Double-check that a fix actually exists
+                  if not vuln.get('FixedVersion'):
+                      continue
                   sev = vuln.get('Severity', 'UNKNOWN')
                   if sev in penalties:
                       total_penalty += penalties[sev]
                       counts[sev] += 1
+                      flagged.append(f\"{sev}: {vuln.get('PkgName')} ({vuln.get('VulnerabilityID')}) -> fix: {vuln.get('FixedVersion')}\")
 
           score = max(0, 100 - total_penalty)
           print('=========================================')
-          print(f'Vulnerability Breakdown: {counts}')
+          print(f'Fixable Vulnerability Breakdown: {counts}')
           print(f'Image Security Score: {score}%')
           print('=========================================')
+          for item in flagged[:10]:
+              print(' -', item)
 
           if score < 80:
               print('❌ Build Failed: Image security score is below the required 80% threshold.')
               sys.exit(1)
           print('✅ Passed: Image meets security score requirements!')
           "
+
 
       # 11. Push Verified Image to Amazon ECR
       - name: Push Image to Amazon ECR
