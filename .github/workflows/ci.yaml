@@ -4,7 +4,7 @@ on:
   push:
     branches: [ "main" ]
     paths-ignore:
-      - "helm_charts/**"
+      - "helm_charts/**" # Prevents infinite loop when GitOps bot commits back to this folder
       
   workflow_dispatch:
 
@@ -14,43 +14,137 @@ permissions:
 jobs:
   build-and-ship:
     runs-on: ubuntu-latest
+    env:
+      ECR_REPOSITORY: my-end-to-end/images
+      IMAGE_TAG: ${{ github.sha }}
+
     steps:
-      # 1. Fetch the Python app code from this repo
+      # 1. Fetch the full git history (fetch-depth: 0 is required for Gitleaks to scan history)
       - name: Checkout Application Code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      # 2. Production Security Scan
+      # 2. Secret Scanning (Checks for exposed API keys, passwords, tokens)
+      - name: Scan for Exposed Secrets (Gitleaks)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # 3. Set up Python for Linting & Static Analysis
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # 4. Code Linting (Ruff) & Static Security Analysis (Bandit)
+      - name: Run Linter and Static Code Analysis
+        run: |
+          pip install ruff bandit
+          echo "Running Ruff Linter..."
+          ruff check .
+          echo "Running Bandit Static Security Analysis..."
+          bandit -r . -ll  # Fails on Medium/High severity Python security issues
+
+      # 5. Filesystem Vulnerability Scan
       - name: Run Trivy FS Vulnerability Scan
         uses: aquasecurity/trivy-action@master
         with:
           scan-type: 'fs'
           scan-ref: '.'
-          exit-code: '1' # Fails the build immediately if security bugs are found
+          exit-code: '1'
           severity: 'CRITICAL,HIGH'
 
-      # 3. Authenticate with AWS using Repository Secrets
-      - name: Configure AWS Credentials (Static Keys)
+      # 6. Authenticate with AWS
+      - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ap-southeast-2 # Match your Sydney infrastructure region
+          aws-region: ap-southeast-2
 
-      # 4. Log in to your manual AWS ECR registry
+      # 7. Log in to Amazon ECR
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      # 5. Build, tag, and push the Python image
-      - name: Build and Push Image to Amazon ECR
+      # 8. Build Docker Image Locally (Do not push yet!)
+      - name: Build Docker Image
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          ECR_REPOSITORY: my-end-to-end/images # Ensure this matches your manually created ECR Repo Name
-          IMAGE_TAG: ${{ github.sha }}
         run: |
           docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
-          echo "+++++++++++++++++++++++++++++++++++++++++++++++++"
-          echo "Printing duild images"
-          docker image ls
+
+      # 9. Scan Built Image with Trivy and Output JSON Report
+      - name: Scan Image with Trivy (Generate Report)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: '${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}'
+          format: 'json'
+          output: 'trivy-results.json'
+          exit-code: '0' # Let the custom Python script below evaluate the 80% score
+
+      # 10. Calculate Security Score (%) and Enforce 80% Threshold
+      - name: Evaluate Image Security Score (>= 80%)
+        run: |
+          python3 -c "
+          import json, sys
+
+          with open('trivy-results.json') as f:
+              data = json.load(f)
+
+          # Penalty weights per vulnerability severity
+          penalties = {'CRITICAL': 25, 'HIGH': 10, 'MEDIUM': 3, 'LOW': 1}
+          total_penalty = 0
+          counts = {'CRITICAL': 0, 'HIGH': 0, 'MEDIUM': 0, 'LOW': 0}
+
+          for result in data.get('Results', []):
+              for vuln in result.get('Vulnerabilities', []):
+                  sev = vuln.get('Severity', 'UNKNOWN')
+                  if sev in penalties:
+                      total_penalty += penalties[sev]
+                      counts[sev] += 1
+
+          score = max(0, 100 - total_penalty)
+          print('=========================================')
+          print(f'Vulnerability Breakdown: {counts}')
+          print(f'Image Security Score: {score}%')
+          print('=========================================')
+
+          if score < 80:
+              print('❌ Build Failed: Image security score is below the required 80% threshold.')
+              sys.exit(1)
+          print('✅ Passed: Image meets security score requirements!')
+          "
+
+      # 11. Push Verified Image to Amazon ECR
+      - name: Push Image to Amazon ECR
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        run: |
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-          
+
+      # 12. GitOps Update: Modify Helm values.yaml and Push to Repo
+            # 12. GitOps Update: Modify Helm values.yaml and Push to Repo
+      - name: Update Helm Chart Image Tag
+        run: |
+          # Install yq to safely edit YAML files
+          sudo wget -qO /usr/local/bin/yq https://github.com
+          sudo chmod +x /usr/local/bin/yq
+
+          # Update .image.tag while preserving double quotes around the SHA
+          yq e '.image.tag = "${{ env.IMAGE_TAG }}"' -i helm_charts/python_app/values.yaml
+
+          # Configure Git bot identity
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@://github.com"
+
+          # Commit and push only if the tag actually changed
+          git add helm_charts/python_app/values.yaml
+          if git diff --staged --quiet; then
+            echo "No changes to values.yaml (image tag is already up to date)."
+          else
+            git commit -m "chore(gitops): update python_app image tag to ${{ env.IMAGE_TAG }}"
+            git push
+          fi
+
