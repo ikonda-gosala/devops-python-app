@@ -1,13 +1,10 @@
 replicaCount: 2
-
 image:
   repository: 217856377746.dkr.ecr.ap-southeast-2.amazonaws.com/my-end-to-end/images
-  tag: "aa81571cc3059f9a1d1207aec1690cc3e6a35bb6"
+  tag: "61d54d26461660a35527f313e0935c7bae10cbde"
   pullPolicy: Always
-
 # Leave empty [] if running on AWS EKS with node IAM permissions (AmazonEC2ContainerRegistryReadOnly).
 imagePullSecrets: []
-
 service:
   type: LoadBalancer
   port: 80
@@ -18,7 +15,6 @@ service:
     service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: "ip"
     # Set to "internet-facing" for public access or "internal" for private VPC-only access
     service.beta.kubernetes.io/aws-load-balancer-scheme: "internet-facing"
-
 resources:
   limits:
     cpu: 250m
